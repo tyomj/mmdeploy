@@ -30,6 +30,7 @@ class Task(AdvancedEnum):
     VIDEO_RECOGNITION = 'VideoRecognition'
     ModelCompress = 'ModelCompress'
     MONO_DETECTION = 'MonoDetection'
+    MV_DETECTION = 'MultiViewDetection'
 
 
 class Codebase(AdvancedEnum):

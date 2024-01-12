@@ -135,6 +135,22 @@ def main():
 
     ret_value = mp.Value('d', 0, lock=False)
 
+    if 'BEV' in model_cfg['model'].get('type', ''):
+        import tensorrt as trt
+
+        from mmdeploy.backend.tensorrt.init_plugins import load_tensorrt_plugin
+
+        def get_plugin_names():
+            return [
+                pc.name for pc in trt.get_plugin_registry().plugin_creator_list
+            ]
+
+        load_tensorrt_plugin()
+        assert 'bev_pool_v2' in get_plugin_names(), \
+            'bev_pool_v2 is not in the plugin list of tensorrt, ' \
+            'please install mmdeploy from ' \
+            'https://github.com/HuangJunJie2017/mmdeploy.git'
+
     # convert to IR
     ir_config = get_ir_config(deploy_cfg)
     ir_save_file = ir_config['save_file']
@@ -308,26 +324,27 @@ def main():
     if backend == Backend.SNPE:
         extra['uri'] = args.uri
 
-    # get backend inference result, try render
-    create_process(
-        f'visualize {backend.value} model',
-        target=visualize_model,
-        args=(model_cfg_path, deploy_cfg_path, backend_files, args.test_img,
-              args.device),
-        kwargs=extra,
-        ret_value=ret_value)
-
-    # get pytorch model inference result, try visualize if possible
-    create_process(
-        'visualize pytorch model',
-        target=visualize_model,
-        args=(model_cfg_path, deploy_cfg_path, [checkpoint_path],
-              args.test_img, args.device),
-        kwargs=dict(
-            backend=Backend.PYTORCH,
-            output_file=osp.join(args.work_dir, 'output_pytorch.jpg'),
-            show_result=args.show),
-        ret_value=ret_value)
+    # Not implemented for multi-view models
+    if 'BEV' not in model_cfg['model'].get('type', ''):
+        # get backend inference result, try render
+        create_process(
+            f'visualize {backend.value} model',
+            target=visualize_model,
+            args=(model_cfg_path, deploy_cfg_path, backend_files,
+                  args.test_img, args.device),
+            kwargs=extra,
+            ret_value=ret_value)
+        # get pytorch model inference result, try visualize if possible
+        create_process(
+            'visualize pytorch model',
+            target=visualize_model,
+            args=(model_cfg_path, deploy_cfg_path, [checkpoint_path],
+                  args.test_img, args.device),
+            kwargs=dict(
+                backend=Backend.PYTORCH,
+                output_file=osp.join(args.work_dir, 'output_pytorch.jpg'),
+                show_result=args.show),
+            ret_value=ret_value)
     logger.info('All process success.')
 
 

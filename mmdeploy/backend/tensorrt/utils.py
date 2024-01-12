@@ -189,6 +189,9 @@ def from_onnx(onnx_model: Union[str, onnx.ModelProto],
         builder.max_workspace_size = max_workspace_size
 
     config = builder.create_builder_config()
+    # TODO: remove for TensorRT 8.6.x
+    config.set_preview_feature(trt.PreviewFeature.FASTER_DYNAMIC_SHAPES_0805,
+                               True)
 
     if hasattr(config, 'set_memory_pool_limit'):
         config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE,

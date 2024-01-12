@@ -1,7 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-import mmcv
 import torch
 from mmdet3d.structures.det3d_data_sample import SampleList
 from mmengine import Config
@@ -13,12 +13,12 @@ from mmdeploy.codebase.base import BaseBackendModel
 from mmdeploy.utils import (Backend, get_backend, get_codebase_config,
                             load_config)
 
-__BACKEND_MODEL = Registry('backend_voxel_detectors')
+__BACKEND_MODEL = Registry('backend_multi_view_detectors')
 
 
 @__BACKEND_MODEL.register_module('end2end')
-class VoxelDetectionModel(BaseBackendModel):
-    """End to end model for inference of 3d voxel detection.
+class MultiViewDetectionModel(BaseBackendModel):
+    """End to end model for inference of multi-view 3D object detection.
 
     Args:
         backend (Backend): The backend enum, specifying backend type.
@@ -67,6 +67,33 @@ class VoxelDetectionModel(BaseBackendModel):
             output_names=output_names,
             deploy_cfg=self.deploy_cfg)
 
+    def test_step(self, data: Union[dict, tuple, list]) -> list:
+        """``BaseModel`` implements ``test_step`` the same as ``val_step``.
+
+        Args:
+            data (dict or tuple or list): Data sampled from dataset.
+
+        Returns:
+            list: The predictions of given data.
+        """
+        data = self.data_preprocessor(data, False)
+        imgs, ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths, mlp_inputs = transform_batch_inputs(  # noqa: E501
+            self.model_cfg, data)
+        inputs = {
+            'imgs': imgs,
+            'ranks_bev': ranks_bev,
+            'ranks_depth': ranks_depth,
+            'ranks_feat': ranks_feat,
+            'interval_starts': interval_starts,
+            'interval_lengths': interval_lengths,
+            'mlp_inputs': mlp_inputs,
+        }
+        input_dict = {
+            'inputs': inputs,
+            'data_samples': data['data_samples'],
+        }
+        return self._run_forward(input_dict, mode='predict')  # type: ignore
+
     def forward(self,
                 inputs: dict,
                 data_samples: Optional[List[BaseDataElement]] = None,
@@ -74,48 +101,21 @@ class VoxelDetectionModel(BaseBackendModel):
         """Run forward inference.
 
         Args:
-            inputs (dict): A dict contains `voxels` which wrapped `voxels`,
-                `num_points` and `coors`
+            inputs (dict): A dict of inputs
             data_samples (List[BaseDataElement]): A list of meta info for
                 image(s).
 
         Returns:
             list: A list contains predictions.
         """
-        preprocessed = inputs['voxels']
-
-        # Get the min shape of input tensors
-        model_inputs = self.deploy_cfg['backend_config']['model_inputs']
-        for entry in model_inputs:
-            if 'input_shapes' in entry:
-                input_shapes = entry['input_shapes']
-                break
-        if input_shapes is not None:
-            voxels_min_shape = input_shapes['voxels']['min_shape']
-            num_points_min_shape = input_shapes['num_points']['min_shape']
-            coors_min_shape = input_shapes['coors']['min_shape']
-            # Pad the input tensors to the min shape if necessary
-            if preprocessed['voxels'].shape[0] < voxels_min_shape[0]:
-                new_voxels = torch.zeros(voxels_min_shape, dtype=torch.float32)
-                new_voxels[:preprocessed['voxels'].shape[0]] = preprocessed[
-                    'voxels']  # noqa: E501
-                preprocessed['voxels'] = new_voxels
-
-                new_num_points = torch.zeros(
-                    num_points_min_shape, dtype=torch.int32)
-                new_num_points[:preprocessed['num_points'].
-                               shape[0]] = preprocessed[
-                                   'num_points']  # noqa: E501
-                preprocessed['num_points'] = new_num_points
-
-                new_coors = torch.zeros(coors_min_shape, dtype=torch.int32)
-                new_coors[:preprocessed['coors'].
-                          shape[0]] = preprocessed['coors']
-                preprocessed['coors'] = new_coors
         input_dict = {
-            'voxels': preprocessed['voxels'].to(self.device),
-            'num_points': preprocessed['num_points'].to(self.device),
-            'coors': preprocessed['coors'].to(self.device)
+            'imgs': inputs['imgs'].to(self.device),
+            'ranks_bev': inputs['ranks_bev'].to(self.device),
+            'ranks_depth': inputs['ranks_depth'].to(self.device),
+            'ranks_feat': inputs['ranks_feat'].to(self.device),
+            'interval_starts': inputs['interval_starts'].to(self.device),
+            'interval_lengths': inputs['interval_lengths'].to(self.device),
+            'mlp_inputs': inputs['mlp_inputs'].to(self.device),
         }
 
         outputs = self.wrapper(input_dict)
@@ -130,43 +130,13 @@ class VoxelDetectionModel(BaseBackendModel):
         if data_samples is None:
             return outputs
 
-        prediction = VoxelDetectionModel.postprocess(
+        prediction = MultiViewDetectionModel.postprocess(
             model_cfg=self.model_cfg,
             deploy_cfg=self.deploy_cfg,
             outs=outputs,
             metas=data_samples)
 
         return prediction
-
-    def show_result(self,
-                    data: Dict,
-                    result: List,
-                    out_dir: str,
-                    file_name: str,
-                    show=False,
-                    snapshot=False,
-                    **kwargs):
-        from mmcv.parallel import DataContainer as DC
-        from mmdet3d.core import show_result
-        if isinstance(data['points'][0], DC):
-            points = data['points'][0]._data[0][0].numpy()
-        elif mmcv.is_list_of(data['points'][0], torch.Tensor):
-            points = data['points'][0][0]
-        else:
-            ValueError(f"Unsupported data type {type(data['points'][0])} "
-                       f'for visualization!')
-        pred_bboxes = result[0]['boxes_3d']
-        pred_labels = result[0]['labels_3d']
-        pred_bboxes = pred_bboxes.tensor.cpu().numpy()
-        show_result(
-            points,
-            None,
-            pred_bboxes,
-            out_dir,
-            file_name,
-            show=show,
-            snapshot=snapshot,
-            pred_labels=pred_labels)
 
     @staticmethod
     def convert_to_datasample(
@@ -287,7 +257,7 @@ class VoxelDetectionModel(BaseBackendModel):
                 batch_input_metas=batch_input_metas,
                 cfg=cfg)
 
-            data_samples = VoxelDetectionModel.convert_to_datasample(
+            data_samples = MultiViewDetectionModel.convert_to_datasample(
                 data_samples=metas, data_instances_3d=data_instances_3d)
 
         else:
@@ -376,11 +346,13 @@ class VoxelDetectionModel(BaseBackendModel):
                     rets.append(ret_task)
                 else:
                     rets.append(
-                        head.get_task_detections(num_class_with_bg,
-                                                 batch_cls_preds,
-                                                 batch_reg_preds,
-                                                 batch_cls_labels,
-                                                 batch_input_metas))
+                        head.get_task_detections(
+                            num_class_with_bg,
+                            batch_cls_preds,
+                            batch_reg_preds,
+                            batch_cls_labels,
+                            batch_input_metas,
+                            task_id=task_id))
 
             # Merge branches results
             num_samples = len(rets[0])
@@ -428,13 +400,13 @@ class VoxelDetectionModel(BaseBackendModel):
                 temp_instances.labels_3d = labels
                 ret_list.append(temp_instances)
 
-            data_samples = VoxelDetectionModel.convert_to_datasample(
+            data_samples = MultiViewDetectionModel.convert_to_datasample(
                 metas, data_instances_3d=ret_list)
 
         return data_samples
 
 
-def build_voxel_detection_model(
+def build_multi_view_detection_model(
         model_files: Sequence[str],
         model_cfg: Union[str, Config],
         deploy_cfg: Union[str, Config],
@@ -442,7 +414,7 @@ def build_voxel_detection_model(
         data_preprocessor: Optional[Union[Config,
                                           BaseDataPreprocessor]] = None,
         **kwargs):
-    """Build 3d voxel object detection model for different backends.
+    """Build multi-view 3d object detection model for different backends.
 
     Args:
         model_files (Sequence[str]): Input model file(s).
@@ -474,3 +446,57 @@ def build_voxel_detection_model(
             **kwargs))
 
     return backend_detector
+
+
+def transform_batch_inputs(model_cfg, data):
+    """Transform batch inputs to model inputs.
+
+    Args:
+        model_cfg (Config): Model config.
+        data (dict): Batch input data.
+        device (str): Device to input model.
+
+    Returns:
+        imgs: (torch.Tensor): Images.
+        ranks_bev: (torch.Tensor): BEV voxel indices.
+        ranks_depth: (torch.Tensor): Depth voxel indices.
+        ranks_feat: (torch.Tensor): Feature voxel indices.
+        interval_starts: (torch.Tensor): Voxel pooling interval starts.
+        interval_lengths: (torch.Tensor): Voxel pooling interval lengths.
+        mlp_inputs: (torch.Tensor): MLP inputs.
+    """
+    # Import detection model i.e. BEVDepth
+    from mmdet3d.registry import MODELS
+    model = MODELS.get(model_cfg.model.type)
+
+    # Build Lift-splat-shoot depth transform
+    vtransform_config = deepcopy(model_cfg.model.vtransform)
+    vtransform_config['depth_net'] = None  # don't need nn parameters
+    vtransform = MODELS.build(vtransform_config)
+
+    batch_input_dict = data['inputs']
+    batch_input_metas = [item.metainfo for item in data['data_samples']]
+
+    # to tensors
+    imgs, points, lidar2image, camera_intrinsics, camera2lidar, img_aug_matrix, lidar_aug_matrix = model.prepare_inputs(  # noqa: E501
+        batch_input_dict, batch_input_metas)
+
+    # stack MLP inputs
+    mlp_inputs = vtransform.get_mlp_inputs(
+        camera2lidar=camera2lidar,
+        intrins=camera_intrinsics[..., :3, :3],
+        post_rots=img_aug_matrix[..., :3, :3],
+        post_trans=img_aug_matrix[..., :3, 3],
+        lidar_aug_matrix=lidar_aug_matrix[:, :, :3, :3])
+
+    # Get coords
+    coor = vtransform.get_lidar_coor(
+        rots=camera2lidar[..., :3, :3],
+        trans=camera2lidar[..., :3, 3],
+        cam2imgs=camera_intrinsics[..., :3, :3],
+        post_rots=img_aug_matrix[..., :3, :3],
+        post_trans=img_aug_matrix[..., :3, 3])
+    # Get bev pooling inputs
+    ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths = vtransform.voxel_pooling_prepare_v2(  # noqa: E501
+        coor)
+    return imgs, ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths, mlp_inputs  # noqa: E501
