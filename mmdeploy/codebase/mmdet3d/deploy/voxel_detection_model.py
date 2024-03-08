@@ -376,11 +376,13 @@ class VoxelDetectionModel(BaseBackendModel):
                     rets.append(ret_task)
                 else:
                     rets.append(
-                        head.get_task_detections(num_class_with_bg,
-                                                 batch_cls_preds,
-                                                 batch_reg_preds,
-                                                 batch_cls_labels,
-                                                 batch_input_metas))
+                        head.get_task_detections(
+                            num_class_with_bg,
+                            batch_cls_preds,
+                            batch_reg_preds,
+                            batch_cls_labels,
+                            batch_input_metas,
+                            task_id=task_id))
 
             # Merge branches results
             num_samples = len(rets[0])
