@@ -77,7 +77,7 @@ class MultiViewDetectionModel(BaseBackendModel):
             list: The predictions of given data.
         """
         data = self.data_preprocessor(data, False)
-        imgs, ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths, mlp_inputs = transform_batch_inputs(  # noqa: E501
+        imgs, ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths, mlp_inputs, depth_map = transform_batch_inputs(  # noqa: E501
             self.model_cfg, data)
         inputs = {
             'imgs': imgs,
@@ -88,6 +88,8 @@ class MultiViewDetectionModel(BaseBackendModel):
             'interval_lengths': interval_lengths,
             'mlp_inputs': mlp_inputs,
         }
+        if depth_map is not None:
+            inputs['depth_map'] = depth_map
         input_dict = {
             'inputs': inputs,
             'data_samples': data['data_samples'],
@@ -117,7 +119,8 @@ class MultiViewDetectionModel(BaseBackendModel):
             'interval_lengths': inputs['interval_lengths'].to(self.device),
             'mlp_inputs': inputs['mlp_inputs'].to(self.device),
         }
-
+        if inputs.get('depth_map', None) is not None:
+            input_dict['depth_map'] = inputs['depth_map'].to(self.device)
         outputs = self.wrapper(input_dict)
         num_level = len(outputs) // 3
         new_outputs = dict(
@@ -454,7 +457,6 @@ def transform_batch_inputs(model_cfg, data):
     Args:
         model_cfg (Config): Model config.
         data (dict): Batch input data.
-        device (str): Device to input model.
 
     Returns:
         imgs: (torch.Tensor): Images.
@@ -464,10 +466,15 @@ def transform_batch_inputs(model_cfg, data):
         interval_starts: (torch.Tensor): Voxel pooling interval starts.
         interval_lengths: (torch.Tensor): Voxel pooling interval lengths.
         mlp_inputs: (torch.Tensor): MLP inputs.
+        depth_map: (torch.Tensor): Depth map, only for BEVDetGTDepth.
     """
     # Import detection model i.e. BEVDepth
     from mmdet3d.registry import MODELS
     model = MODELS.get(model_cfg.model.type)
+
+    with_gt_depth = False
+    if model_cfg.model.type == 'BEVDetGTDepth':
+        with_gt_depth = True
 
     # Build Lift-splat-shoot depth transform
     vtransform_config = deepcopy(model_cfg.model.vtransform)
@@ -499,4 +506,15 @@ def transform_batch_inputs(model_cfg, data):
     # Get bev pooling inputs
     ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths = vtransform.voxel_pooling_prepare_v2(  # noqa: E501
         coor)
-    return imgs, ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths, mlp_inputs  # noqa: E501
+
+    if not with_gt_depth:
+        return imgs, ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths, mlp_inputs, None  # noqa: E501
+
+    # For BEVDetGTDepth, we need depth map
+    depth_from_points = [x['gt_depth'] for x in batch_input_metas]
+    depth_map = torch.stack(depth_from_points).to(imgs)
+
+    with torch.no_grad():
+        depth_map = vtransform.get_downsampled_gt_depth_with_gaussian_multi_modal(  # noqa: E501
+            depth_map, label_smoothing=0.1)[0]
+    return imgs, ranks_bev, ranks_depth, ranks_feat, interval_starts, interval_lengths, mlp_inputs, depth_map  # noqa: E501
