@@ -8,7 +8,8 @@ from mmdeploy.utils import get_ir_config
 @FUNCTION_REWRITER.register_rewriter(
     'mmdet3d_custom.models.detectors.bevdet.BEVDet.forward')
 def bevdet__forward(self, imgs, ranks_bev, ranks_depth, ranks_feat,
-                    interval_starts, interval_lengths, mlp_inputs, **kwargs):
+                    interval_starts, interval_lengths, mlp_inputs, *args,
+                    **kwargs):
     """Rewrite this func to utilize TRTBEVPoolv2.
 
     Args:
@@ -42,7 +43,11 @@ def bevdet__forward(self, imgs, ranks_bev, ranks_depth, ranks_feat,
     B, N, C, H, W = img_feat.shape
     img_feat = img_feat.view(B * N, C, H, W)
     img_feat = self.vtransform.depth_net(img_feat, mlp_inputs)
-    depth = img_feat[:, :self.vtransform.D].softmax(dim=1)
+    if not hasattr(self.vtransform, 'depth_weightning_function'
+                   ) or self.vtransform.depth_weightning_function == 'softmax':
+        depth = img_feat[:, :self.vtransform.D].softmax(dim=1)
+    else:
+        depth = img_feat[:, :self.vtransform.D].sigmoid()
     tran_feat = img_feat[:, self.vtransform.D:(self.vtransform.D +
                                                self.vtransform.out_channels)]
     tran_feat = tran_feat.view(B, N, self.vtransform.out_channels, H, W)
