@@ -145,8 +145,8 @@ const char *TRTBEVPoolV2Creator::getPluginVersion() const TRT_NOEXCEPT { return 
 
 nvinfer1::IPluginV2 *TRTBEVPoolV2Creator::createPlugin(
     const char *name, const nvinfer1::PluginFieldCollection *fc) TRT_NOEXCEPT {
-  int outWidth = 128;
-  int outHeight = 128;
+  int outWidth = 256;
+  int outHeight = 256;
   for (int i = 0; i < fc->nbFields; i++) {
     if (fc->fields[i].data == nullptr) {
       continue;
