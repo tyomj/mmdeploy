@@ -132,14 +132,14 @@ def get_extensions():
         # More details at https://github.com/pytorch/pytorch/pull/45956
         extra_compile_args = {'cxx': []}
 
-        # c++14 is required.
+        # c++17 is required.
         # However, in the windows environment, some standard libraries
         # will depend on c++17 or higher. In fact, for the windows
         # environment, the compiler will choose the appropriate compiler
         # to compile those cpp files, so there is no need to add the
         # argument
         if platform.system() != 'Windows':
-            extra_compile_args['cxx'] = ['-std=c++14']
+            extra_compile_args['cxx'] = ['-std=c++17']
 
         include_dirs = []
 
@@ -152,14 +152,14 @@ def get_extensions():
             '/onnx/*.cpp')
         extension = CppExtension
 
-        # c++14 is required.
+        # c++17 is required.
         # However, in the windows environment, some standard libraries
         # will depend on c++17 or higher. In fact, for the windows
         # environment, the compiler will choose the appropriate compiler
         # to compile those cpp files, so there is no need to add the
         # argument
         if 'nvcc' in extra_compile_args and platform.system() != 'Windows':
-            extra_compile_args['nvcc'] += ['-std=c++14']
+            extra_compile_args['nvcc'] += ['-std=c++17']
 
         ext_ops = extension(
             name=ext_name,
