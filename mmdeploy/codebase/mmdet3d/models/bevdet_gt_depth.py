@@ -6,7 +6,7 @@ from mmdeploy.utils import get_ir_config
 
 
 @FUNCTION_REWRITER.register_rewriter(
-    'mmdet3d_custom.models.detectors.bevdet.BEVDetGTDepth.forward')
+    'mmstack.mmdet3d_custom.models.detectors.bevdet.BEVDetGTDepth.forward')
 def bevdet_gt_depth__forward(self, imgs, ranks_bev, ranks_depth, ranks_feat,
                              interval_starts, interval_lengths, mlp_inputs,
                              depth_map, **kwargs):
@@ -92,7 +92,8 @@ def bevdet_gt_depth__forward(self, imgs, ranks_bev, ranks_depth, ranks_feat,
 
 
 @FUNCTION_REWRITER.register_rewriter(
-    'mmdet3d_custom.models.necks.vtransformer.LSSDepthTransformGT.forward')
+    'mmstack.mmdet3d_custom.models.necks.vtransformer.LSSDepthTransformGT.forward'  # noqa: E501
+)
 def lss_depth_transform_gt__forward(self, args, **kwargs):
     """Rewrite this func to be a placeholder."""
     pass
